@@ -51,28 +51,30 @@ def getPosLvlSalary():
     Город	КодГорода	Должность	Уровень	Зарплата	Период	ДатаОбновления
     """
     query = f"""                                                                                                                                                                               
-WITH first_query AS
-	(
-	SELECT  
-	--		reg_table.Должность AS Должность
-			dwh.[Справочник.ШтатноеРасписание].Наименование AS Должность
-			,reg_table.Уровень AS Уровень
-			,dwh.[Справочник.Города].Наименование AS Город
-			,dwh.[Справочник.Города].Код AS КодГорода
-			,reg_table.Значение AS Зарплата
-			, MAX(convert(date, Период)) OVER (PARTITION BY Должность, Уровень, Город) AS max_period
-			,convert(date, reg_table.Период) as Период 
-	FROM dwh.[РегистрСведений.УровеньЗаработнойПлаты] AS reg_table
-	JOIN dwh.[Справочник.Города] ON reg_table.Город = dwh.[Справочник.Города].Ссылка 
-	JOIN dwh.[Справочник.ШтатноеРасписание] ON reg_table.Должность  =  dwh.[Справочник.ШтатноеРасписание].Ссылка  
-	)
+    WITH first_query AS
+        (
+        SELECT  
+        --		reg_table.Должность AS Должность
+                ШтатноеРасписание.Наименование AS Должность
+                ,reg_table.Уровень AS Уровень
+                ,dwh.[Справочник.Города].Наименование AS Город
+                ,dwh.[Справочник.Города].Код AS КодГорода
+                ,reg_table.Значение AS Зарплата
+                , MAX(Период) OVER (PARTITION BY reg_table.Город, reg_table.Должность, reg_table.Уровень) AS max_period
+                ,reg_table.Период as Период
+                ,ШтатноеРасписание.ЛидерскийУровень  
+        FROM dwh.[РегистрСведений.УровеньЗаработнойПлаты] AS reg_table
+        JOIN dwh.[Справочник.Города] ON reg_table.Город = dwh.[Справочник.Города].Ссылка 
+        JOIN dwh.[Справочник.ШтатноеРасписание] ШтатноеРасписание ON reg_table.Должность  =  ШтатноеРасписание.Ссылка  
+            AND ШтатноеРасписание.ПрефиксКДолжности NOT IN  ('ДОМ', 'ГРП')
+        )
 
-	SELECT Город,КодГорода, Должность, Уровень, Зарплата, Период, CONVERT(DATE, GETDATE()) AS ДатаОбновления
-	FROM  first_query
-	WHERE Период = max_period
-		AND Должность != '2.03. Фед.развитие сайта'
-		AND Должность not like '%(на аутсорсе)%' 
-	ORDER BY Зарплата
+        SELECT Город,КодГорода, Должность, Уровень, Зарплата, Период, max_period, CONVERT(DATE, GETDATE()) AS ДатаОбновления, ЛидерскийУровень
+        FROM  first_query
+        WHERE Период = max_period
+            AND Должность != '2.03. Фед.развитие сайта'
+            AND Должность not like '%(на аутсорсе)%' 
+        ORDER BY Должность, Уровень
 	 """
     df_GetPosLvlSalary = execute_mssql(query, '1c_replica')
     return df_GetPosLvlSalary
