@@ -84,13 +84,13 @@ def getActualStaff():
     ДатаОбновления	Должность	УровеньОплаты	Город	ТекущийФилиал	КоличествоСотрудников
     """
     query = f"""
-     select
-        as2."Должность"
-        , as2."УровеньОплаты"
-        , as2."ТекущийФилиал"
-        ,count(*) as КоличествоСотрудников
-        , as2."Город"
-        , as2."Филиал"
+   select
+     as2."Должность"
+    , as2."УровеньОплаты"
+    , as2."ТекущийФилиал"
+    ,count(*) as КоличествоСотрудников
+    , as2."Город"
+    , as2."Филиал"
   from actual_staff as2
   where as2."Должность" not like '%%(на аутсорсе)%%'
   group by as2."Должность", as2."УровеньОплаты", as2."ТекущийФилиал", as2."ДатаОбновления", as2."Город", as2."Филиал"
@@ -99,12 +99,13 @@ def getActualStaff():
     df_getActualStaff = execute_pg_hr(query)
     return df_getActualStaff
 
+
 def getLossBranches():
 
 	"""НазваниеФирмы	НазваниеГорода	Должность"""
 
 	query = f"""
-	WITH МаксДатаЦТЕ AS (
+		WITH МаксДатаЦТЕ AS (
 	select 
 	--	DATEFROMPARTS(YEAR(Дата), MONTH(Дата), 1) AS Дата
 			Дата
@@ -137,11 +138,26 @@ def getLossBranches():
 		and Проведен = 0x01
 	--	    AND сф.Код = 1293
 	--	order by душр.Дата
-								)
+
+	), result_table AS
+	(
 	SELECT НазваниеФирмы, НазваниеГорода, Должность
 	FROM МаксДатаЦТЕ
 	WHERE МаксДата = Дата
 	group by НазваниеФирмы, НазваниеГорода, Должность
+	)
+
+	select rt1.*
+		, 1 as Уровень
+	from result_table rt1
+	union all 
+	select rt2.*
+		, 2 as Уровень
+	from result_table rt2
+	union all
+	select rt3.*
+		, 3 as Уровень
+	from result_table rt3		
 
 	"""
 	df = execute_mssql(query, '1c_replica')
@@ -154,12 +170,14 @@ def uploadTable(**context):
     df_actual_staff = context['task_instance'].xcom_pull('getActualStaff')
     df_loss_branches = context['task_instance'].xcom_pull('getLossBranches')
     logging.info('1')
-    df_checkerboard_salary = df_PosLvlSalary \
-        .merge(df_actual_staff, left_on=['Город','Должность', 'Уровень'], right_on=['Город','Должность', 'УровеньОплаты'], how='left')\
-        .merge(df_loss_branches, left_on=['Город','Должность'], right_on=['НазваниеГорода','Должность'], how='left')
-    df_checkerboard_salary['КоличествоСотрудников'].fillna(0, inplace=True)
+    df_main =  df_loss_branches\
+        .merge(df_actual_staff, left_on=['НазваниеФирмы', 'Должность', 'Уровень'], right_on=['Филиал', 'Должность', 'УровеньОплаты'], how='left')
+    df_main['Город'] = df_main['Город'].fillna(df_main['НазваниеГорода'])
+    df_main['Филиал'] = df_main['Филиал'].fillna(df_main['НазваниеФирмы'])
+    df_main['КоличествоСотрудников'] = df_main['КоличествоСотрудников'].fillna(0)
+    df_checkerboard_salary = df_PosLvlSalary.merge(df_main, left_on=['Город','Должность', 'Уровень'], right_on=['Город', 'Должность', 'Уровень'], how='left')
     df_checkerboard_salary = df_checkerboard_salary[['Город', 'Филиал', 'Должность', 
-                            'Уровень', 'Зарплата','КоличествоСотрудников']] 
+                        'Уровень', 'Зарплата','КоличествоСотрудников']]
     logging.info('3')
     conection_url = get_postgres_connection_string('mart_hr')
     logging.info('4')  
@@ -206,3 +224,4 @@ with dag:
     )
 
     start_dummy_op >> _getPosLvlSalary >> _getActualStaff  >>  _getLossBranches >> _uploadTable >> end_dummy_op 
+
