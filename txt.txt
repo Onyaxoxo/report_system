@@ -1,0 +1,76 @@
+def execute_clickhouse(query="select 'Test' as Test",
+                       database='mart_hr',
+                       external_tables=None,
+                       **kwargs) -> pd.DataFrame:
+    """
+    Функция для выполнения запросов к Clickhouse
+
+    **Аргументы:**
+
+    - `query: str` - запрос
+    - `database: str` - база данных (по-умолчанию `'dns_log'`)
+    - `external_tables: pandas.DataFrame` - датафрэйм из которого бдует генерироваться внешняя таблица
+
+    **Возвращает:**
+    >    `pandas.DataFrame` с результатом запроса
+    """
+    client = Client(
+        host='adm-dwh-ch1.dns-shop.ru',
+        port='9000',
+        database=database,
+        user='peredereev.ro',
+        password='RrfrOPjcoi3Mk6t'
+    )
+    if external_tables:
+        pass
+        #external_tables = [df_to_table(table[0], table[1]) for table in external_tables]
+    rv = client.execute(query, external_tables=external_tables, with_column_types=True)
+    df = pd.DataFrame(rv[0])
+    df.columns = [i[0] for i in rv[1]]
+    return df
+
+def execute_pg_hr(query):
+    """Функция обращения к хранилищу mart_hr DNS на чтение
+    Параметры:
+    query - строка, SQL запрос
+    Возвращает - pandas DataFrame с содержанием результата выполнения запроса, названия столбцов из запроса"""
+
+    host = 'adm-dwh-pg1.dns-shop.ru'
+    schema = 'mart_hr'
+    login = 'db_hr'
+    password = 'eD3IdP'
+
+    conection_url = f'postgresql+psycopg2://{login}:{password}@{host}/{schema}'
+
+    engine = create_engine(conection_url)
+    df = pd.read_sql(query, engine)
+    engine.dispose()
+    return df
+
+def get_postgres_connection_string(connection_id) -> str:
+    """
+    Возвращает строку подключения к postgres для указанного подключения
+    :return:
+    """
+    class connection:
+        login = 'db_hr'
+        password = 'eD3IdP'
+        host = 'adm-dwh-pg1.dns-shop.ru'
+        port = '5432'
+        schema = 'mart_hr'
+
+    return f'postgresql+psycopg2://{connection.login}:{connection.password}@{connection.host}:{connection.port}/{connection.schema}'
+
+def execute_onec(query):
+    """Функция обращения к Хранилищу DNS на чтение
+    Параметры:
+    query - строка, SQL запрос
+    Возвращает - pandas DataFrame с содержанием результата выполнения запроса, названия столбцов из запроса"""
+    ADuser = 'PARTNER\Peredereev.RO'
+    ADpassword = 'Poki4poki4228'
+    # ADuser = Config.ONEC_LOGIN
+    # ADpassword = Config.ONEC_PASSWORD
+    conn = pymssql.connect(server='10.10.33.220', user=ADuser, password=ADpassword, database='dns_m')
+    df = pd.read_sql(query, conn)
+    
+    return df
