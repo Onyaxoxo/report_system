@@ -21,8 +21,8 @@ from db_resources import (execute_clickhouse, execute_mssql, get_postgres_connec
 # logger.addHandler(stream_handler)
 logger = logging.getLogger('airflow.task')
 default_args = {
-    'owner': '',
     'start_date': datetime(year=2022,month=1,day=23,hour=0, minute=0),
+    'owner': '',
     'email': ['.ru', '.ru'],
     'email_on_failure': True
 }
@@ -38,7 +38,7 @@ default_args = {
 
 dag = DAG(
     'update_table_checkerboard',
-    schedule_interval='0 * * * *', # @hourly
+    schedule_interval='0 * * * *', # @hourчёly
     default_args=default_args,
     catchup=False,
     description='Обновление таблицы с шахматкой зарплаты',
@@ -47,35 +47,76 @@ dag = DAG(
 )
 
 def getPosLvlSalary():
-    """
-    Город	КодГорода	Должность	Уровень	Зарплата	Период	ДатаОбновления
-    """
     query = f"""                                                                                                                                                                               
-    WITH first_query AS
-    (
-    SELECT  
-    --		reg_table.Должность AS Должность
-            ШтатноеРасписание.Наименование AS Должность
-            ,reg_table.Уровень AS Уровень
-            ,dwh.[Справочник.Города].Наименование AS Город
-            ,dwh.[Справочник.Города].Код AS КодГорода
-            ,reg_table.Значение AS Зарплата
-            , MAX(Период) OVER (PARTITION BY reg_table.Город, reg_table.Должность, reg_table.Уровень) AS max_period
-            ,reg_table.Период as Период
-            ,ШтатноеРасписание.ЛидерскийУровень  
-    FROM dwh.[РегистрСведений.УровеньЗаработнойПлаты] AS reg_table
-    JOIN dwh.[Справочник.Города] ON reg_table.Город = dwh.[Справочник.Города].Ссылка 
-    JOIN dwh.[Справочник.ШтатноеРасписание] ШтатноеРасписание ON reg_table.Должность  =  ШтатноеРасписание.Ссылка  
-        AND ШтатноеРасписание.ПрефиксКДолжности NOT IN  ('ДОМ', 'ГРП')
-    )
-
-    SELECT Город,КодГорода, Должность, Уровень, Зарплата, Период, max_period, CONVERT(DATE, GETDATE()) AS ДатаОбновления, ЛидерскийУровень
-    FROM  first_query
-    WHERE Период = max_period
-        AND Должность != '2.03. Фед.развитие сайта'
-        AND Должность not like '%(на аутсорсе)%' 
-    ORDER BY Должность, Уровень
-	 """
+	  WITH first_query AS
+        (
+SELECT  
+--		reg_table.Должность AS Должность
+        ШтатноеРасписание.Наименование AS Должность
+        ,рсузп.Уровень AS Уровень
+        ,сг.Наименование AS Город
+        ,сг.Код AS КодГорода
+        , сг.Регион AS СсылкаРегион
+        ,рсузп.Значение AS Зарплата
+        , MAX(Период) OVER (PARTITION BY рсузп.Город, рсузп.Должность, рсузп.Уровень) AS max_period
+        ,рсузп.Период as Период
+        ,ШтатноеРасписание.ЛидерскийУровень
+        , рсузп.Город  AS СсылкаГород
+        , сг.ТерриториальноеРасположение AS СсылкаГородТерритория
+FROM dwh.[РегистрСведений.УровеньЗаработнойПлаты] AS рсузп
+JOIN dwh.[Справочник.Города] AS сг 
+	ON рсузп.Город = сг.Ссылка 
+JOIN dwh.[Справочник.ШтатноеРасписание] ШтатноеРасписание ON рсузп.Должность  =  ШтатноеРасписание.Ссылка  
+    AND ШтатноеРасписание.ПрефиксКДолжности NOT IN  ('ДОМ', 'ГРП')      		
+        ),
+findMaxDate AS (
+SELECT 
+	  Город
+	, КодГорода
+	, Должность
+	, Уровень
+	, Зарплата
+	, Период
+	, max_period
+	, CONVERT(DATE, GETDATE()) AS ДатаОбновления
+	, ЛидерскийУровень
+	, СсылкаГород
+	, СсылкаРегион
+	
+FROM  first_query
+WHERE Период = max_period
+    AND Должность != '2.03. Фед.развитие сайта'
+    AND Должность not like '%(на аутсорсе)%' 
+        ),
+joinTerrerory AS (
+	SELECT
+		 ст.Наименование AS Территория
+		, сг.Ссылка AS СсылкаГорода
+	FROM dwh.[Справочник.Города] сг
+	JOIN dwh.[Справочник.Фирмы] сф
+		ON сф.Город = сг.Ссылка
+	JOIN dwh.[Справочник.Фирмы.ИерархияТерриторий] сфит
+		ON сф.Ссылка = сфит.Ссылка
+		AND сфит.Уровень = 3
+	JOIN dwh.[Справочник.Территории] ст
+		ON ст.Ссылка = сфит.Территория
+	GROUP BY
+		 ст.Наименование
+		, сг.Ссылка 	
+		)	
+SELECT
+	  Территория
+	, Город
+	, КодГорода
+	, Должность
+	, findMaxDate.Уровень
+	, Зарплата
+	, CONVERT(DATE, GETDATE()) AS ДатаОбновления
+	, ЛидерскийУровень
+FROM findMaxDate
+JOIN joinTerrerory
+	ON СсылкаГород = joinTerrerory.СсылкаГорода
+			                                         """
     df_GetPosLvlSalary = execute_mssql(query, '1c_replica')
     return df_GetPosLvlSalary
 
@@ -84,7 +125,7 @@ def getActualStaff():
     ДатаОбновления	Должность	УровеньОплаты	Город	ТекущийФилиал	КоличествоСотрудников
     """
     query = f"""
-   select
+ select
      as2."Должность"
     , as2."УровеньОплаты"
     , as2."ТекущийФилиал"
@@ -93,7 +134,7 @@ def getActualStaff():
     , as2."Филиал"
   from actual_staff as2
   where as2."Должность" not like '%%(на аутсорсе)%%'
-  group by as2."Должность", as2."УровеньОплаты", as2."ТекущийФилиал", as2."ДатаОбновления", as2."Город", as2."Филиал"
+  group by as2."Должность", as2."УровеньОплаты", as2."ТекущийФилиал", as2."ДатаОбновления", as2."Город", as2."Филиал", as2."РРС" 
   order by as2."Должность", as2."ТекущийФилиал", as2."УровеньОплаты" 
    """
     df_getActualStaff = execute_pg_hr(query)
@@ -102,10 +143,11 @@ def getActualStaff():
 
 def getLossBranches():
 
-	"""НазваниеФирмы	НазваниеГорода	Должность"""
+	"""НазваниеФирмы	НазваниеГорода	Территория	Должность	Уровень"""
 
 	query = f"""
-		WITH МаксДатаЦТЕ AS (
+	
+WITH МаксДатаЦТЕ AS (
 	select 
 	--	DATEFROMPARTS(YEAR(Дата), MONTH(Дата), 1) AS Дата
 			Дата
@@ -134,11 +176,6 @@ def getLossBranches():
 		on сшр.Ссылка = душрс.Должность 
 	JOIN dwh.[Справочник.Города] сг 
 		ON сф.Город = сг.Ссылка 
-	where Дата >= '2021-01-01'
-		and Проведен = 0x01
-	--	    AND сф.Код = 1293
-	--	order by душр.Дата
-
 	), result_table AS
 	(
 	SELECT НазваниеФирмы, НазваниеГорода, Должность
@@ -146,7 +183,6 @@ def getLossBranches():
 	WHERE МаксДата = Дата
 	group by НазваниеФирмы, НазваниеГорода, Должность
 	)
-
 	select rt1.*
 		, 1 as Уровень
 	from result_table rt1
@@ -157,9 +193,9 @@ def getLossBranches():
 	union all
 	select rt3.*
 		, 3 as Уровень
-	from result_table rt3		
-
+	from result_table rt3			
 	"""
+
 	df = execute_mssql(query, '1c_replica')
 	return df
 
@@ -174,10 +210,13 @@ def uploadTable(**context):
         .merge(df_actual_staff, left_on=['НазваниеФирмы', 'Должность', 'Уровень'], right_on=['Филиал', 'Должность', 'УровеньОплаты'], how='left')
     df_main['Город'] = df_main['Город'].fillna(df_main['НазваниеГорода'])
     df_main['Филиал'] = df_main['Филиал'].fillna(df_main['НазваниеФирмы'])
-    df_main['КоличествоСотрудников'] = df_main['КоличествоСотрудников'].fillna(0)
+    
     df_checkerboard_salary = df_PosLvlSalary.merge(df_main, left_on=['Город','Должность', 'Уровень'], right_on=['Город', 'Должность', 'Уровень'], how='left')
-    df_checkerboard_salary = df_checkerboard_salary[['Город', 'Филиал', 'Должность', 
-                        'Уровень', 'Зарплата','КоличествоСотрудников']]
+    df_checkerboard_salary = df_checkerboard_salary[['Территория','Город', 'Филиал', 'Должность', 
+                                'Уровень', 'Зарплата','ЛидерскийУровень','КоличествоСотрудников']]
+
+    df_checkerboard_salary['КоличествоСотрудников'] = df_checkerboard_salary['КоличествоСотрудников'].fillna(0)
+
     logging.info('3')
     conection_url = get_postgres_connection_string('mart_hr')
     logging.info('4')  
@@ -224,4 +263,3 @@ with dag:
     )
 
     start_dummy_op >> _getPosLvlSalary >> _getActualStaff  >>  _getLossBranches >> _uploadTable >> end_dummy_op 
-
