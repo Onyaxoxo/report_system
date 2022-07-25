@@ -200,6 +200,19 @@ WITH МаксДатаЦТЕ AS (
 
 def uploadTable(**context):
 
+    sql_replace_tmp = f"""
+        DROP table public.checkerboard_salary;
+        ALTER TABLE public.checkerboard_salary_tmp RENAME TO checkerboard_salary;
+        """
+    sql_set_index = f"""
+        DROP INDEX IF EXISTS checkerboard_salary_тер_гор_idx;
+        DROP INDEX IF EXISTS checkerboard_salary_тер_фил_idx;
+        DROP INDEX IF EXISTS checkerboard_salary_территория_idx;
+        CREATE INDEX checkerboard_salary_тер_гор_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Город" text_ops,"Должность" text_ops);
+        CREATE INDEX checkerboard_salary_тер_фил_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Филиал" text_ops,"Должность" text_ops);
+        CREATE INDEX checkerboard_salary_территория_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Город" text_ops,"Филиал" text_ops,"Должность" text_ops);
+    """
+    
 #  df_mean = context['task_instance'].xcom_pull('update_actual_staff')
     df_PosLvlSalary = context['task_instance'].xcom_pull('getPosLvlSalary')
     df_actual_staff = context['task_instance'].xcom_pull('getActualStaff')
@@ -223,18 +236,10 @@ def uploadTable(**context):
     con = eng.connect()
     transaction = con.begin()
     logging.info('5')
+
     df_checkerboard_salary.to_sql('checkerboard_salary_tmp', eng, if_exists='replace', 
                     method='multi', chunksize=1024, index=False)
 
-    sql_replace_tmp = f"""
-        DROP table public.checkerboard_salary;
-        ALTER TABLE public.checkerboard_salary_tmp RENAME TO checkerboard_salary;
-        """
-    sql_set_index = f"""
-        CREATE INDEX checkerboard_salary_тер_гор_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Город" text_ops,"Должность" text_ops);
-        CREATE INDEX checkerboard_salary_тер_фил_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Филиал" text_ops,"Должность" text_ops);
-        CREATE INDEX checkerboard_salary_территория_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Город" text_ops,"Филиал" text_ops,"Должность" text_ops);
-    """
     eng.execute(sql_set_index)
     eng.execute(sql_replace_tmp)
 
