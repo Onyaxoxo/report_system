@@ -26,7 +26,6 @@ default_args = {
     'email': ['.ru', '.ru'],
     'email_on_failure': True
 }
-
 # @provide_session
 # def cleanup_xcom(context, session=None):
 #     '''
@@ -214,7 +213,6 @@ def uploadTable(**context):
     df_checkerboard_salary = df_PosLvlSalary.merge(df_main, left_on=['Город','Должность', 'Уровень'], right_on=['Город', 'Должность', 'Уровень'], how='left')
     df_checkerboard_salary = df_checkerboard_salary[['Территория','Город', 'Филиал', 'Должность', 
                                 'Уровень', 'Зарплата','ЛидерскийУровень','КоличествоСотрудников']]
-
     df_checkerboard_salary['КоличествоСотрудников'] = df_checkerboard_salary['КоличествоСотрудников'].fillna(0)
 
     logging.info('3')
@@ -222,12 +220,27 @@ def uploadTable(**context):
     logging.info('4')  
     from sqlalchemy import create_engine
     eng = create_engine(conection_url)
+    con = eng.connect()
+    transaction = con.begin()
     logging.info('5')
-    df_checkerboard_salary.to_sql('checkerboard_salary', eng, if_exists='replace', 
+    df_checkerboard_salary.to_sql('checkerboard_salary_tmp', eng, if_exists='replace', 
                     method='multi', chunksize=1024, index=False)
-    logging.info('6')
+
+    sql_replace_tmp = f"""
+        DROP table public.checkerboard_salary;
+        ALTER TABLE public.checkerboard_salary_tmp RENAME TO checkerboard_salary;
+        """
+    sql_set_index = f"""
+        CREATE INDEX checkerboard_salary_тер_гор_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Город" text_ops,"Должность" text_ops);
+        CREATE INDEX checkerboard_salary_тер_фил_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Филиал" text_ops,"Должность" text_ops);
+        CREATE INDEX checkerboard_salary_территория_idx ON public.checkerboard_salary_tmp ("Территория" text_ops,"Город" text_ops,"Филиал" text_ops,"Должность" text_ops);
+    """
+    eng.execute(sql_set_index)
+    eng.execute(sql_replace_tmp)
+
+    transaction.commit()
+    logging.info('8')
     eng.dispose()
-    logging.info('7')
     return 
 
 
@@ -263,3 +276,79 @@ with dag:
     )
 
     start_dummy_op >> _getPosLvlSalary >> _getActualStaff  >>  _getLossBranches >> _uploadTable >> end_dummy_op 
+
+
+
+
+#  # заменяем данные в основной таблице данными из временной через TRUNCATE TABLE
+#     for table in ['divisions', 'vacancy', 'positions', 'recruters']:
+#         sql_replace_to_tmp = f"""
+#             TRUNCATE TABLE public.{table};
+#             INSERT INTO public.{table} 
+#             SELECT *
+#             FROM public.tmp_{table};
+#             DROP table public.tmp_{table};
+#         """
+
+# """
+# Вариант загрузки ДАГа с использованием replace / update
+
+# #  df_mean = context['task_instance'].xcom_pull('update_actual_staff')
+#     df_PosLvlSalary = context['task_instance'].xcom_pull('getPosLvlSalary')
+#     df_actual_staff = context['task_instance'].xcom_pull('getActualStaff')
+#     df_loss_branches = context['task_instance'].xcom_pull('getLossBranches')
+#     logging.info('1')
+#     df_main =  df_loss_branches\
+#         .merge(df_actual_staff, left_on=['НазваниеФирмы', 'Должность', 'Уровень'], right_on=['Филиал', 'Должность', 'УровеньОплаты'], how='left')
+#     df_main['Город'] = df_main['Город'].fillna(df_main['НазваниеГорода'])
+#     df_main['Филиал'] = df_main['Филиал'].fillna(df_main['НазваниеФирмы'])
+    
+#     df_checkerboard_salary = df_PosLvlSalary.merge(df_main, left_on=['Город','Должность', 'Уровень'], right_on=['Город', 'Должность', 'Уровень'], how='left')
+#     df_checkerboard_salary = df_checkerboard_salary[['Территория','Город', 'Филиал', 'Должность', 
+#                                 'Уровень', 'Зарплата','ЛидерскийУровень','КоличествоСотрудников']]
+#     df_checkerboard_salary['КоличествоСотрудников'] = df_checkerboard_salary['КоличествоСотрудников'].fillna(0)
+
+#     logging.info('3')
+#     conection_url = get_postgres_connection_string('mart_hr')
+#     logging.info('4')  
+#     from sqlalchemy import create_engine
+#     eng = create_engine(conection_url)
+#     logging.info('5')
+#     df_checkerboard_salary.to_sql('checkerboard_salary', eng, if_exists='replace',      # if_exists='append', 
+#                     method='multi', chunksize=1024, index=False)    
+#     logging.info('6')
+#     eng.dispose()
+#     logging.info('7')
+#     return 
+
+# """
+# Через дроп таблицы
+# """
+#     logging.info('3')
+#     conection_url = get_postgres_connection_string('mart_hr')
+#     logging.info('4')  
+#     from sqlalchemy import create_engine
+#     eng = create_engine(conection_url)
+#     con = eng.connect()
+#     transaction = con.begin()
+#     logging.info('5')
+#     df_checkerboard_salary.to_sql('checkerboard_salary_tmp', eng, if_exists='replace', 
+#                     method='multi', chunksize=1024, index=False)
+
+#     sql_replace_tmp = f"""
+#         DROP table public.checkerboard_salary;
+#         ALTER TABLE public.checkerboard_salary_tmp RENAME TO checkerboard_salary;
+#         """
+#     sql_set_index = f"""
+#         CREATE INDEX checkerboard_salary_тер_гор_idx ON public.checkerboard_salary ("Территория" text_ops,"Город" text_ops,"Должность" text_ops);
+#         CREATE INDEX checkerboard_salary_тер_фил_idx ON public.checkerboard_salary ("Территория" text_ops,"Филиал" text_ops,"Должность" text_ops);
+#         CREATE INDEX checkerboard_salary_территория_idx ON public.checkerboard_salary ("Территория" text_ops,"Город" text_ops,"Филиал" text_ops,"Должность" text_ops);
+#     """
+#     eng.execute(sql_replace_tmp)
+#     # eng.execute(sql_set_index)
+#     transaction.commit()
+#     logging.info('6')
+#     eng.dispose()
+#     logging.info('7')
+#     return 
+# """
